@@ -54,12 +54,12 @@ MeanYn <- with(db1.28_nondrgt, aggregate(TRI, by=list(site), FUN=meanNA))[,2]
 # mean Ym by site according to Li et al
 INFOSET_T$MeanYn_Li <- rep(MeanYn, 1, each=110)
 
+INFOSET_T$year_Li  <- rep(1901:2010, length(site_list), each=1)
+
 # subset INFOSET_T to extract drought years
 db1.28_Li <- subset(INFOSET_T, SPEId + 1.28 <= 0)
 
-# formulas as in Li et al (2020)
-db1.28_Li$Li_Rt <- with(db1.28_Li, MeanYn_Li/abs(RWI_Li-MeanYn_Li))
-db1.28_Li$Li_Rs <- with(db1.28_Li, abs((RWI_Li-MeanYn_Li)/(Gpost_Li-MeanYn_Li)))
+
 
 
 
@@ -70,8 +70,6 @@ db1.28_Li$Li_Rs <- with(db1.28_Li, abs((RWI_Li-MeanYn_Li)/(Gpost_Li-MeanYn_Li)))
 # # eliminate +Inf in both Rt and Rs (uses library(data.table))
 invisible(lapply(names(db1.28_Li),function(.name) set(db1.28_Li, which(is.infinite(db1.28_Li[[.name]])), 
                                                       j = .name,value =NA)))
-# eliminate NAs in both Rt and Rs
-db1.28_Li  <- db1.28_Li[complete.cases(db1.28_Li[ , 'Li_Rs']),]
 
 
 # subsets of time periods for both db1.28 and db1.28_2 df
@@ -98,17 +96,6 @@ db1.28_pre_post$pre_post <- factor(db1.28_pre_post$pre_post, levels = c('02_29',
 #### Subset to only CONIFERS ___________________________________________    ####
 
 db1.28_Gymn <- subset(db1.28_pre_post, Groups == 'Gymnosperms')
-
-# scale all numeric predictors before analysis
-db1.28_Gymn$year                 <- as.vector(scale(db1.28_Gymn$year))
-db1.28_Gymn$log_RWI4             <- as.vector(scale(db1.28_Gymn$log_RWI4))
-db1.28_Gymn$log_RWI42            <- as.vector(scale(db1.28_Gymn$log_RWI4))
-db1.28_Gymn$log_Max_age          <- as.vector(scale(db1.28_Gymn$log_Max_age))
-db1.28_Gymn$TMP_Annual_fixed     <- as.vector(scale(db1.28_Gymn$TMP_Annual_fixed))
-db1.28_Gymn$log_PRE_Annual_fixed <- as.vector(scale(db1.28_Gymn$log_PRE_Annual_fixed))
-db1.28_Gymn$continentality_fixed <- as.vector(scale(db1.28_Gymn$continentality_fixed))
-db1.28_Gymn$slope_TMPxYear       <- as.vector(scale(db1.28_Gymn$slope_TMPxYear))
-db1.28_Gymn$slope_PRExYear       <- as.vector(scale(db1.28_Gymn$slope_PRExYear))
 
 # normalise Lloret resilience and year
 Rs_norm <- bestNormalize(db1.28_Gymn$Resilience, allow_lambert_s = TRUE, allow_lambert_h = TRUE) # eliminate original log scale
@@ -147,15 +134,11 @@ for(i in 1:length(unique(db1.28_Gymn$site))) {
     print(i)
 }
 
-lrg_grp  <- site_lst[site_lst$select_1=='OK',]  # 368 sites
-smll_grp <- site_lst[site_lst$select_1=='OK' & site_lst$select_2=='OK',] # 319 sites
+lrg_grp  <- site_lst[site_lst$select_1=='OK',]  
 
 db_lrg_grp <-  db1.28_Gymn[db1.28_Gymn$site %in% lrg_grp$site_lst,]
-db_smll_grp <- db1.28_Gymn[db1.28_Gymn$site %in% smll_grp$site_lst,]
 
 db_lrg_grp$site  <-  as.factor(db_lrg_grp$site)
-db_smll_grp$site <-  as.factor(db_smll_grp$site)
-
 
 db_past_1950 <- with(db_lrg_grp, db_lrg_grp[which(pre_post== '50_69' | pre_post== '70_89' | pre_post== '70_89' | pre_post== '90_09'),])
 db_past_1950 <- droplevels(db_past_1950)
