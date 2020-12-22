@@ -54,15 +54,15 @@ MeanYn <- with(db1.28_nondrgt, aggregate(TRI, by=list(site), FUN=meanNA))[,2]
 # mean Ym by site according to Li et al
 INFOSET_T$MeanYn_Li <- rep(MeanYn, 1, each=110)
 
-INFOSET_T$year_Li  <- rep(1901:2010, length(site_list), each=1)
-
 # subset INFOSET_T to extract drought years
 db1.28_Li <- subset(INFOSET_T, SPEId + 1.28 <= 0)
 
+# formulas as in Li et al (2020)
+db1.28_Li$Li_Rt <- with(db1.28_Li, MeanYn_Li/abs(RWI_Li-MeanYn_Li))
+db1.28_Li$Li_Rs <- with(db1.28_Li, abs((RWI_Li-MeanYn_Li)/(Gpost_Li-MeanYn_Li)))
 
 
-
-
+rm(MeanYn)
 
 
 #### Pre_post dataset                                _______________________####
@@ -70,6 +70,8 @@ db1.28_Li <- subset(INFOSET_T, SPEId + 1.28 <= 0)
 # # eliminate +Inf in both Rt and Rs (uses library(data.table))
 invisible(lapply(names(db1.28_Li),function(.name) set(db1.28_Li, which(is.infinite(db1.28_Li[[.name]])), 
                                                       j = .name,value =NA)))
+# eliminate NAs in both Rt and Rs
+db1.28_Li  <- db1.28_Li[complete.cases(db1.28_Li[ , 'Li_Rs']),]
 
 
 # subsets of time periods for both db1.28 and db1.28_2 df
@@ -97,6 +99,17 @@ db1.28_pre_post$pre_post <- factor(db1.28_pre_post$pre_post, levels = c('02_29',
 
 db1.28_Gymn <- subset(db1.28_pre_post, Groups == 'Gymnosperms')
 
+# scale all numeric predictors before analysis
+db1.28_Gymn$year                 <- as.vector(scale(db1.28_Gymn$year))
+db1.28_Gymn$log_RWI4             <- as.vector(scale(db1.28_Gymn$log_RWI4))
+db1.28_Gymn$log_RWI42            <- as.vector(scale(db1.28_Gymn$log_RWI4))
+db1.28_Gymn$log_Max_age          <- as.vector(scale(db1.28_Gymn$log_Max_age))
+db1.28_Gymn$TMP_Annual_fixed     <- as.vector(scale(db1.28_Gymn$TMP_Annual_fixed))
+db1.28_Gymn$log_PRE_Annual_fixed <- as.vector(scale(db1.28_Gymn$log_PRE_Annual_fixed))
+db1.28_Gymn$continentality_fixed <- as.vector(scale(db1.28_Gymn$continentality_fixed))
+db1.28_Gymn$slope_TMPxYear       <- as.vector(scale(db1.28_Gymn$slope_TMPxYear))
+db1.28_Gymn$slope_PRExYear       <- as.vector(scale(db1.28_Gymn$slope_PRExYear))
+
 # normalise Lloret resilience and year
 Rs_norm <- bestNormalize(db1.28_Gymn$Resilience, allow_lambert_s = TRUE, allow_lambert_h = TRUE) # eliminate original log scale
 Rs_norm
@@ -107,6 +120,8 @@ db1.28_Gymn$Rs_norm <- Rs_norm $chosen_transform$x.t
 Rs_norm <- bestNormalize(db1.28_Gymn$year, allow_lambert_s = TRUE, allow_lambert_h = TRUE) # eliminate original log scale
 Rs_norm
 db1.28_Gymn$year_norm <- Rs_norm $chosen_transform$x.t
+
+rm(Rs_norm)
 
 
 #### Subset to CONIFERS 5-droughts _________________________________________####
@@ -134,16 +149,20 @@ for(i in 1:length(unique(db1.28_Gymn$site))) {
     print(i)
 }
 
-lrg_grp  <- site_lst[site_lst$select_1=='OK',]  
+lrg_grp  <- site_lst[site_lst$select_1=='OK',]  # 368 sites
+smll_grp <- site_lst[site_lst$select_1=='OK' & site_lst$select_2=='OK',] # 319 sites
 
 db_lrg_grp <-  db1.28_Gymn[db1.28_Gymn$site %in% lrg_grp$site_lst,]
+db_smll_grp <- db1.28_Gymn[db1.28_Gymn$site %in% smll_grp$site_lst,]
 
 db_lrg_grp$site  <-  as.factor(db_lrg_grp$site)
+db_smll_grp$site <-  as.factor(db_smll_grp$site)
+
 
 db_past_1950 <- with(db_lrg_grp, db_lrg_grp[which(pre_post== '50_69' | pre_post== '70_89' | pre_post== '70_89' | pre_post== '90_09'),])
 db_past_1950 <- droplevels(db_past_1950)
 
-
+rm(pippo)
 
 
 #### Import Li et al data from 332 sites ___________________________________####
@@ -260,6 +279,74 @@ Li_Rt_norm
 
 df3$Li_Rt_norm <- Li_Rt_norm $chosen_transform$x.t
 
+rm(Li_Rs_norm, Li_Rt_norm)
 
 #_______________________________________________________________________
 
+
+#### Test co-variance of Rs and Rt against random time series ______________####
+
+  
+  library(RcppRoll)
+  sd_G   <- with(db1.28_Gymn, sd(log(TRI)))
+  mean_G <- with(db1.28_Gymn, mean(log(TRI), na.remove=T))
+  
+  # draw log-normal distribution centred at real values of mean and var for TRI
+  randG <- (rlnorm(1000, meanlog = mean_G, sdlog = sd_G))
+  
+  rndm <- as.data.frame(randG)
+  
+  rndm <- rndm %>%
+    rownames_to_column() %>%
+    mutate(year = as.numeric(rowname)) %>%
+    column_to_rownames()
+  
+  # creation of Gprev and Gpost variables
+  rndm$Gpost <-  c(tail(roll_meanr(rndm$randG, n= 4), -4), rep(NA,4))
+  rndm$Gprev <-  c(NA, head(roll_meanr(rndm$randG, n= 4), -1))
+  
+  
+  # calculation of the two pairs of Rs and Rt indices
+  rndm$Li_Rt   <- with(rndm, mean(randG)/abs(randG - mean(randG)))
+  rndm$Li_Rs   <- with(rndm, abs((randG-mean(randG))/(Gpost-mean(randG))))
+
+  rndm <- rndm %>%
+    drop_na(Li_Rs, Li_Rt) %>%
+    mutate(Li_Rt_norm = bestNormalize(Li_Rt, 
+                                      allow_lambert_s = TRUE, 
+                                      allow_lambert_h = TRUE)$chosen_transform$x.t) %>%
+    mutate(Li_Rs_norm = bestNormalize(Li_Rs, 
+                                      allow_lambert_s = TRUE, 
+                                      allow_lambert_h = TRUE)$chosen_transform$x.t)
+  
+# plot Isbell against random draw of points
+
+  library(smatr)
+  with(rndm, summary(lm(Li_Rt_norm  ~  Li_Rs_norm, rndm)))
+  with(rndm, summary(lm(log(Li_Rt)  ~  log(Li_Rs), rndm)))
+  m <- with(rndm, sma(Li_Rt_norm  ~  Li_Rs_norm, rndm))
+  m2 <- with(rndm, lm(Li_Rt_norm  ~  Li_Rs_norm, rndm))
+  
+  par(mfrow=c(1,1))
+  par(mar = c(4,4,3,2) + 0.1, mgp = c(2, 1, 0), cex=1, cex.lab=1.6,
+      cex.main=1.6, las = 1, cex.axis = 1.4)
+  
+  # plot Li et al
+  with(db1.5_T_Gymn, plot(Li_Rs_norm ~ Li_Rt_norm, 
+                          main='Random draw test', 
+                          ylab='Resilience', xlab='Resistance'))
+  text(x = 8, y = 5, labels = 'Li et al (2020)', cex = 2)
+  text(x = 8, y = 3.5, labels = 'Random draw', col = 'red', cex = 2)
+  points(x = rndm$Li_Rt_norm, y = rndm$Li_Rs_norm, col = 'red')
+  text(x = 8, y = 2, labels = 'R2 = 0.50', col = 'red', cex = 1.6)
+  
+  
+  # plot non-normalised Li et al
+  with(db1.5_T_Gymn, plot(log(Li_Rs) ~ log(Li_Rt), 
+                          main='Autocorrelation test', 
+                          ylab='Resilience', xlab='Resistance'))
+  text(x = 8, y = 5, labels = 'Li et al (2020)', cex = 2)
+  text(x = 8, y = 3.5, labels = 'Random draw', col = 'red', cex = 2)
+  points(x = log(rndm$Li_Rt), y = log(rndm$Li_Rs), col = 'red')
+  text(x = 8, y = 2, labels = 'R2 = 0.50', col = 'red', cex = 1.6)
+  
